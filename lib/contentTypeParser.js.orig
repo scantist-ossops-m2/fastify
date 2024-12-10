@@ -32,10 +32,9 @@ const {
 
 function ContentTypeParser (bodyLimit, onProtoPoisoning, onConstructorPoisoning) {
   this[kDefaultJsonParse] = getDefaultJsonParser(onProtoPoisoning, onConstructorPoisoning)
-  // using a map instead of a plain object to avoid prototype hijack attacks
-  this.customParsers = new Map()
-  this.customParsers.set('application/json', new Parser(true, false, bodyLimit, this[kDefaultJsonParse]))
-  this.customParsers.set('text/plain', new Parser(true, false, bodyLimit, defaultPlainTextParser))
+  this.customParsers = {}
+  this.customParsers['application/json'] = new Parser(true, false, bodyLimit, this[kDefaultJsonParse])
+  this.customParsers['text/plain'] = new Parser(true, false, bodyLimit, defaultPlainTextParser)
   this.parserList = ['application/json', 'text/plain']
   this.parserRegExpList = []
   this.cache = lru(100)
@@ -66,35 +65,35 @@ ContentTypeParser.prototype.add = function (contentType, opts, parserFn) {
   )
 
   if (contentTypeIsString && contentType === '*') {
-    this.customParsers.set('', parser)
+    this.customParsers[''] = parser
   } else {
     if (contentTypeIsString) {
       this.parserList.unshift(contentType)
     } else {
       this.parserRegExpList.unshift(contentType)
     }
-    this.customParsers.set(contentType.toString(), parser)
+    this.customParsers[contentType] = parser
   }
 }
 
 ContentTypeParser.prototype.hasParser = function (contentType) {
-  return this.customParsers.has(typeof contentType === 'string' ? contentType : contentType.toString())
+  return contentType in this.customParsers
 }
 
 ContentTypeParser.prototype.existingParser = function (contentType) {
-  if (contentType === 'application/json' && this.customParsers.has(contentType)) {
-    return this.customParsers.get(contentType).fn !== this[kDefaultJsonParse]
+  if (contentType === 'application/json') {
+    return this.customParsers['application/json'] && this.customParsers['application/json'].fn !== this[kDefaultJsonParse]
   }
-  if (contentType === 'text/plain' && this.customParsers.has(contentType)) {
-    return this.customParsers.get(contentType).fn !== defaultPlainTextParser
+  if (contentType === 'text/plain') {
+    return this.customParsers['text/plain'] && this.customParsers['text/plain'].fn !== defaultPlainTextParser
   }
 
-  return this.hasParser(contentType)
+  return contentType in this.customParsers
 }
 
 ContentTypeParser.prototype.getParser = function (contentType) {
-  if (this.hasParser(contentType)) {
-    return this.customParsers.get(contentType)
+  if (contentType in this.customParsers) {
+    return this.customParsers[contentType]
   }
 
   if (this.cache.has(contentType)) {
@@ -105,7 +104,7 @@ ContentTypeParser.prototype.getParser = function (contentType) {
   for (var i = 0; i !== this.parserList.length; ++i) {
     const parserName = this.parserList[i]
     if (contentType.indexOf(parserName) !== -1) {
-      const parser = this.customParsers.get(parserName)
+      const parser = this.customParsers[parserName]
       this.cache.set(contentType, parser)
       return parser
     }
@@ -115,17 +114,17 @@ ContentTypeParser.prototype.getParser = function (contentType) {
   for (var j = 0; j !== this.parserRegExpList.length; ++j) {
     const parserRegExp = this.parserRegExpList[j]
     if (parserRegExp.test(contentType)) {
-      const parser = this.customParsers.get(parserRegExp.toString())
+      const parser = this.customParsers[parserRegExp]
       this.cache.set(contentType, parser)
       return parser
     }
   }
 
-  return this.customParsers.get('')
+  return this.customParsers['']
 }
 
 ContentTypeParser.prototype.removeAll = function () {
-  this.customParsers = new Map()
+  this.customParsers = {}
   this.parserRegExpList = []
   this.parserList = []
   this.cache = lru(100)
@@ -134,7 +133,7 @@ ContentTypeParser.prototype.removeAll = function () {
 ContentTypeParser.prototype.remove = function (contentType) {
   if (!(typeof contentType === 'string' || contentType instanceof RegExp)) throw new FST_ERR_CTP_INVALID_TYPE()
 
-  this.customParsers.delete(contentType.toString())
+  delete this.customParsers[contentType]
 
   const parsers = typeof contentType === 'string' ? this.parserList : this.parserRegExpList
 
@@ -289,7 +288,7 @@ function Parser (asString, asBuffer, bodyLimit, fn) {
 function buildContentTypeParser (c) {
   const contentTypeParser = new ContentTypeParser()
   contentTypeParser[kDefaultJsonParse] = c[kDefaultJsonParse]
-  contentTypeParser.customParsers = new Map(c.customParsers.entries())
+  Object.assign(contentTypeParser.customParsers, c.customParsers)
   contentTypeParser.parserList = c.parserList.slice()
   return contentTypeParser
 }
